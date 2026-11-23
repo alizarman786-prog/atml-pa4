@@ -21,7 +21,7 @@ Code for EE-5102/CS-6304 Programming Assignment 4 (Fall 2026).
 | `pa4/t3_distill.py` | Task 3: off-policy / on-policy forward-KL LoRA distillation, adapter merging |
 | `pa4/t3_eval.py` | Task 3: prefix banks, distribution alignment, speculative benchmark, standalone accuracy, wrapper overhead |
 | `tests/` | CPU unit tests on tiny random Qwen2 models (`PYTHONPATH=. python tests/test_t1.py`, ...) |
-| `notebooks/PA4_kaggle.ipynb` | Kaggle runner (clones this repo; `PHASE = "smoke" | "A" | "B"`) |
+| `notebooks/PA4_kaggle.ipynb` | Kaggle runner (clones this repo; `PHASE = "smoke" | "A" | "B" | "C"`) |
 | `build_notebook.py` | regenerates the runner notebook |
 
 ## Reproduction
@@ -40,7 +40,7 @@ python -m pa4.t3_distill --method off --seed 6304                      # (repeat
 python -m pa4.t3_eval --stage validate,costs,specbank,studentbanks,align,spec,fixed64,accuracy,unmerged
 ```
 
-On Kaggle, open `notebooks/PA4_kaggle.ipynb` with GPU T4 x2 and Internet on, set `PHASE`, and run.
+On Kaggle, open `notebooks/PA4_kaggle.ipynb` with GPU T4 x2 and Internet on, set `PHASE`, and run. Phase `C` recomputes only the Task 3 alignment metrics from a finished Phase B (attach that version's output as an Input).
 Every stage writes machine-readable JSON/JSONL/NPZ files under `$PA4_OUT` and skips work that is already saved.
 Setting `PA4_QUICK=1` runs a reduced smoke test.
 

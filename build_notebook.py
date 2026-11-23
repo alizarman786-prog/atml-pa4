@@ -15,11 +15,12 @@ Set `PHASE` in the next cell, then **Run All** (interactive) or **Save Version �
 |---|---|---|
 | `smoke` | quick end-to-end tests of every script (tiny budgets) → `/kaggle/working/smoke` | ~40 min (already passed) |
 | `A` | full Task 1 on GPU0 ‖ full Task 2 (A, B, C) on GPU1 → `/kaggle/working/results` | ~3–3.5 h |
-| `B` | full Task 3 (prefix banks, 4 distillation runs, all evaluations) on both GPUs | ~4–5 h |
+| `B` | full Task 3 (prefix banks, 4 distillation runs, all evaluations) on both GPUs | ~3–4 h |
+| `C` | re-run only the Task 3 alignment stage on top of a finished Phase B (attach the Phase B notebook output as Input first) | ~20–30 min |
 
 Logs stream to `/kaggle/working/logs/*.log`; every stage resumes from saved results if restarted.""")
 
-code('PHASE = "A"   # "smoke" | "A" | "B"\n')
+code('PHASE = "A"   # "smoke" | "A" | "B" | "C"\n')
 
 code("""%%bash
 set -e
@@ -118,6 +119,21 @@ code('''if PHASE == "B":
                                           "python -m pa4.t3_eval --stage accuracy"]),
     }
     wait_all(procs); show_failures()
+''')
+
+code('''if PHASE == "C":
+    # Restore Phase B outputs from the attached notebook output, then recompute the alignment metrics only.
+    import glob, shutil
+    hits = [p for p in glob.glob("/kaggle/input/**/results/task3/distill", recursive=True)]
+    assert hits, "attach the Phase B notebook output as an Input"
+    src = pathlib.Path(hits[0]).parents[2]; print("restoring from", src)
+    shutil.copytree(src / "results", "/kaggle/working/results", dirs_exist_ok=True)
+    banks = glob.glob(str(src / "**" / "prefix_banks_locked.jsonl.gz"), recursive=True)
+    dst = pathlib.Path("/kaggle/working/atml-pa4-datasets/data/prefix_banks"); dst.mkdir(parents=True, exist_ok=True)
+    for b in banks: shutil.copy(b, dst)
+    print("prefix banks:", banks)
+    procs = {"t3_align": stream("t3_align", 0, ["python -m pa4.t3_eval --stage align"])}
+    wait_all(procs, every=120); show_failures()
 ''')
 
 code('''# Package results for download (Output tab) — small JSON/JSONL/NPZ files only
