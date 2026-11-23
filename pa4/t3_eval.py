@@ -25,6 +25,9 @@ def draft_model(name):
     if name == "original": return load_model(DRAFT, "model_draft")
     from transformers import AutoModelForCausalLM
     m, s = name.split("_")
+    if not (CACHE / f"merged_{m}_seed{s}").exists():   # cache lives in /tmp: rebuild from the saved adapter
+        from .t3_distill import merge
+        merge(m, int(s))
     return AutoModelForCausalLM.from_pretrained(CACHE / f"merged_{m}_seed{s}", torch_dtype=torch.float16,
                                                 attn_implementation="sdpa").cuda().eval()
 
@@ -83,33 +86,32 @@ def dist_metrics(p_logits, q_logits):
 
 @torch.inference_mode()
 def stage_align(tok, target, drafts=DRAFTS):
+    """Streams over (bank, prompt) groups: one target forward and one forward per draft on prompt + longest prefix,
+    metrics computed on the GPU for the needed rows only (no full-vocab rows kept in host RAM)."""
     banks = load_banks(); short_split = {r["id"]: r["split"] for r in read_jsonl(DATA / "short_form" / "short_test.jsonl")}
     groups = {}
     for i, r in enumerate(banks): groups.setdefault((r["bank"], r["prompt_id"]), []).append(i)
-    # target logits once per (bank, prompt): one forward over prompt + longest prefix, gather needed rows
-    def rows_for(model):
-        out = {}
-        for (bk, pid), idx in groups.items():
-            recs = [banks[i] for i in idx]; longest = max(recs, key=lambda r: len(r["response_prefix_token_ids"]))
-            pids = chat_ids(tok, recs[0]["prompt"]); seq = pids + longest["response_prefix_token_ids"]
-            lg = model(input_ids=torch.as_tensor([seq], device="cuda")).logits[0]
-            for i, r in zip(idx, recs):
-                pre = r["response_prefix_token_ids"]; assert pre == longest["response_prefix_token_ids"][:len(pre)]
-                out[i] = lg[len(pids) + len(pre) - 1].float().cpu()
-        return out
-    t_rows = rows_for(target)
-    res = []
+    models = {}
     for d in drafts:
-        try: m = draft_model(d)
-        except Exception as e: print("skip", d, e); continue
-        q_rows = rows_for(m)
-        for i, r in enumerate(banks):
-            met = dist_metrics(t_rows[i][None], q_rows[i][None])
-            dom = r["domain"] if r["domain"] == "math" else ("short_" + short_split.get(r["prompt_id"], "?"))
-            res.append(dict(draft=d, bank=r["bank"], prompt_id=r["prompt_id"], position=r["position"], domain=dom,
-                            **{k: float(v[0]) for k, v in met.items()}, exp_accept=1 - float(met["tv"][0])))
-        del m; torch.cuda.empty_cache(); print("aligned", d, flush=True)
+        try: models[d] = draft_model(d)
+        except Exception as e: print("skip", d, e, flush=True)
+    res = []
+    for g, ((bk, pid), idx) in enumerate(groups.items()):
+        recs = [banks[i] for i in idx]; longest = max(recs, key=lambda r: len(r["response_prefix_token_ids"]))
+        pids = chat_ids(tok, recs[0]["prompt"]); seq = torch.as_tensor([pids + longest["response_prefix_token_ids"]], device="cuda")
+        for r in recs: assert r["response_prefix_token_ids"] == longest["response_prefix_token_ids"][:len(r["response_prefix_token_ids"])]
+        rows = torch.as_tensor([len(pids) + len(r["response_prefix_token_ids"]) - 1 for r in recs], device="cuda")
+        t_lg = target(input_ids=seq).logits[0].index_select(0, rows)
+        for d, m in models.items():
+            met = dist_metrics(t_lg, m(input_ids=seq).logits[0].index_select(0, rows))
+            met = {k: v.float().cpu().tolist() for k, v in met.items()}
+            for j, r in enumerate(recs):
+                dom = r["domain"] if r["domain"] == "math" else ("short_" + short_split.get(r["prompt_id"], "?"))
+                res.append(dict(draft=d, bank=r["bank"], prompt_id=r["prompt_id"], position=r["position"], domain=dom,
+                                **{k: met[k][j] for k in met}, exp_accept=1 - met["tv"][j]))
+        if (g + 1) % 100 == 0: print("aligned groups", g + 1, "/", len(groups), flush=True)
     write_jsonl(R / "alignment_per_prefix.jsonl.gz", res)
+    print("aligned", sorted(models), len(res), "rows", flush=True)
 
 
 # ---------------- speculative benchmark ----------------

@@ -225,7 +225,7 @@ def merge(method, seed):
     agree = float(np.mean([(a.argmax(-1) == b.argmax(-1)).float().mean().item() for a, b in zip(un, mg)]))
     merged.save_pretrained(dst); tok.save_pretrained(dst)
     res = dict(merge_s=merge_s, max_abs_logit_diff_merged_vs_unmerged=err, argmax_agreement=agree, path=str(dst))
-    save_json(out / "merge.json", res); return res
+    save_json(out / ("merge_rebuild.json" if (out / "merge.json").exists() else "merge.json"), res); return res
 
 
 if __name__ == "__main__":
