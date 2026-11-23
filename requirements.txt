@@ -1,0 +1,7 @@
+# Kaggle image provides torch (2.11, CUDA 13) and numpy/pandas/scipy/matplotlib
+transformers==4.57.1
+huggingface_hub==0.36.2
+datasets>=3,<5
+peft==0.17.1
+scipy
+pandas
