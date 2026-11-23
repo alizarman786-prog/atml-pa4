@@ -16,7 +16,7 @@ Set `PHASE` in the next cell, then **Run All** (interactive) or **Save Version �
 | `smoke` | quick end-to-end tests of every script (tiny budgets) → `/kaggle/working/smoke` | ~40 min (already passed) |
 | `A` | full Task 1 on GPU0 ‖ full Task 2 (A, B, C) on GPU1 → `/kaggle/working/results` | ~3–3.5 h |
 | `B` | full Task 3 (prefix banks, 4 distillation runs, all evaluations) on both GPUs | ~3–4 h |
-| `C` | re-run only the Task 3 alignment stage on top of a finished Phase B (attach the Phase B notebook output as Input first) | ~20–30 min |
+| `C` | re-run only the Task 3 alignment stage on top of a finished Phase B (attach the Phase B notebook output as Input first) | ~40–50 min |
 
 Logs stream to `/kaggle/working/logs/*.log`; every stage resumes from saved results if restarted.""")
 
@@ -105,7 +105,7 @@ code('''if PHASE == "B":
     procs = {
       "t3_train0": stream("t3_train0", 0, ["python -m pa4.t3_distill --method off --seed 6304",
                                             "python -m pa4.t3_distill --method on --seed 6304"]),
-      "t3_train1": stream("t3_train1", 1, ["cd /kaggle/working/atml-pa4-datasets && python scripts/setup_data.py --prefix-banks; cd /kaggle/working/code",
+      "t3_train1": stream("t3_train1", 1, ["python -m pa4.prefix_banks",
                                             "python -m pa4.t3_spec --toy --n 100000",
                                             "python -m pa4.t3_distill --method off --seed 6305",
                                             "python -m pa4.t3_distill --method on --seed 6305"]),
@@ -131,8 +131,10 @@ code('''if PHASE == "C":
     banks = glob.glob(str(src / "**" / "prefix_banks_locked.jsonl.gz"), recursive=True)
     dst = pathlib.Path("/kaggle/working/atml-pa4-datasets/data/prefix_banks"); dst.mkdir(parents=True, exist_ok=True)
     for b in banks: shutil.copy(b, dst)
-    print("prefix banks:", banks)
-    procs = {"t3_align": stream("t3_align", 0, ["python -m pa4.t3_eval --stage align"])}
+    print("prefix banks restored:", banks)
+    # teacher / original-draft banks are generated here if the Phase B run did not produce them
+    procs = {"t3_align": stream("t3_align", 0, ["python -m pa4.prefix_banks",
+                                                "python -m pa4.t3_eval --stage align"])}
     wait_all(procs, every=120); show_failures()
 ''')
 

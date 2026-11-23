@@ -41,6 +41,7 @@ python -m pa4.t3_eval --stage validate,costs,specbank,studentbanks,align,spec,fi
 ```
 
 On Kaggle, open `notebooks/PA4_kaggle.ipynb` with GPU T4 x2 and Internet on, set `PHASE`, and run. Phase `C` recomputes only the Task 3 alignment metrics from a finished Phase B (attach that version's output as an Input).
+Teacher and original-draft prefix banks are built with `python -m pa4.prefix_banks`, which runs the course script `setup_data.py --prefix-banks` unchanged; the shim only adapts its `generate(generator=...)` call to the pinned transformers 4.57.1 by seeding the RNG from the same per-prompt seed.
 Every stage writes machine-readable JSON/JSONL/NPZ files under `$PA4_OUT` and skips work that is already saved.
 Setting `PA4_QUICK=1` runs a reduced smoke test.
 
