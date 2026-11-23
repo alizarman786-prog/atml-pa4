@@ -20,6 +20,8 @@ Code for EE-5102/CS-6304 Programming Assignment 4 (Fall 2026).
 | `pa4/t3_spec.py` | Task 3: exact speculative sampling core, toy Markov chi-square test, real-model decoder with cache rollback |
 | `pa4/t3_distill.py` | Task 3: off-policy / on-policy forward-KL LoRA distillation, adapter merging |
 | `pa4/t3_eval.py` | Task 3: prefix banks, distribution alignment, speculative benchmark, standalone accuracy, wrapper overhead |
+| `pa4/prefix_banks.py` | runs the course `setup_data.py --prefix-banks` under the pinned transformers release |
+| `pa4/report.py` | CPU-only summary tables (CSV + Markdown, bootstrap 95% CIs) and figures from the saved results |
 | `tests/` | CPU unit tests on tiny random Qwen2 models (`PYTHONPATH=. python tests/test_t1.py`, ...) |
 | `notebooks/PA4_kaggle.ipynb` | Kaggle runner (clones this repo; `PHASE = "smoke" | "A" | "B" | "C"`) |
 | `build_notebook.py` | regenerates the runner notebook |
@@ -42,6 +44,8 @@ python -m pa4.t3_eval --stage validate,costs,specbank,studentbanks,align,spec,fi
 
 On Kaggle, open `notebooks/PA4_kaggle.ipynb` with GPU T4 x2 and Internet on, set `PHASE`, and run. Phase `C` recomputes only the Task 3 alignment metrics from a finished Phase B (attach that version's output as an Input).
 Teacher and original-draft prefix banks are built with `python -m pa4.prefix_banks`, which runs the course script `setup_data.py --prefix-banks` unchanged; the shim only adapts its `generate(generator=...)` call to the pinned transformers 4.57.1 by seeding the RNG from the same per-prompt seed.
+To turn saved results into tables and figures, unpack the result archives into one folder and run
+`python -m pa4.report --results results --out report_assets` (needs pandas and matplotlib; `tabulate` is optional).
 Every stage writes machine-readable JSON/JSONL/NPZ files under `$PA4_OUT` and skips work that is already saved.
 Setting `PA4_QUICK=1` runs a reduced smoke test.
 

@@ -140,7 +140,8 @@ code('''if PHASE == "C":
 
 code('''# Package results for download (Output tab) — small JSON/JSONL/NPZ files only
 src = "smoke" if PHASE == "smoke" else "results"
-subprocess.run(f"cd /kaggle/working && tar czf results_{PHASE}.tgz {src} logs && ls -la /kaggle/working", shell=True)
+subprocess.run(f"cd /kaggle/working/code && python -m pa4.report --results /kaggle/working/{src} --out /kaggle/working/report_{PHASE}", shell=True)
+subprocess.run(f"cd /kaggle/working && tar czf results_{PHASE}.tgz {src} logs report_{PHASE} && ls -la /kaggle/working", shell=True)
 ''')
 
 nb = dict(cells=cells, metadata=dict(kernelspec=dict(display_name="Python 3", language="python", name="python3"),
