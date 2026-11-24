@@ -374,7 +374,7 @@ def task2a(R, out):
     hdr2 = " & & " + " & ".join(rf"\multicolumn{{2}}{{c}}{{$L$={L:,}}}" for L in keepL) + r" \\"
     tabular(body, ["Pass", "Method"] + ["ms", "MiB"] * len(keepL), "ll" + "rr" * len(keepL), out, "t2a_bench",
             midrules=[3], header2=hdr2)
-    note("TTwoABenchReps", "--")
+    note("TTwoABenchReps", r"10 timed runs after 3 warm-up runs (3 timed runs for tiled fwd+bwd at $L\ge 4096$)")
     env = R / "task2" / "A" / "env.json"
     if env.exists():
         e = jload(env)
@@ -490,11 +490,13 @@ POL = ["full", "sink_recent", "qaware", "quant_token", "quant_kivi", "hybrid"]
 def task2c(R, out):
     d = pd.DataFrame(jlines(R / "task2" / "C" / "c5_per_prompt.jsonl"))
     note("TTwoCN", d.id.nunique())
+    # group by the nominal context bucket; ctx_len is each prompt's actual token count
+    d["Lb"] = d.target_tokens if "target_tokens" in d and d.target_tokens.notna().all() else d.ctx_len
     body, mids = [], []
-    for j, L in enumerate(sorted(d.ctx_len.unique())):
+    for j, L in enumerate(sorted(d.Lb.unique())):
         if j: mids.append(len(body))
         for p in [p for p in POL if p in set(d.policy)]:
-            g = d[(d.ctx_len == L) & (d.policy == p)]
+            g = d[(d.Lb == L) & (d.policy == p)]
             m, lo, hi = boot_mean(g.correct.astype(float))
             ev = g.evidence_retained_frac.mean() if "evidence_retained_frac" in g and g.evidence_retained_frac.notna().any() else np.nan
             body.append([f"{L:,}", esc(p), f"{100 * m:.1f} {ci(lo, hi, 1, pct=True)}", num(g.realized_frac_fp16.mean(), 3),
@@ -515,15 +517,15 @@ def task2c(R, out):
             rows.append(cells)
         tabular(rows, ["Policy"] + [esc(o) for o in order], "l" + "r" * len(order), out, "t2c_position")
     fig, ax = plt.subplots(1, 3, figsize=(W1, 1.85))
-    Ls = sorted(d.ctx_len.unique())
+    Ls = sorted(d.Lb.unique())
     for i, p in enumerate([p for p in POL if p in set(d.policy)]):
         ys, los, his = [], [], []
         for L in Ls:
-            m, lo, hi = boot_mean(d[(d.ctx_len == L) & (d.policy == p)].correct.astype(float)); ys.append(100 * m); los.append(100 * (m - lo)); his.append(100 * (hi - m))
+            m, lo, hi = boot_mean(d[(d.Lb == L) & (d.policy == p)].correct.astype(float)); ys.append(100 * m); los.append(100 * (m - lo)); his.append(100 * (hi - m))
         off = (i - 2.5) * 0.025
         ax[0].errorbar([np.log2(L) + off for L in Ls], ys, yerr=[los, his], marker=MARK[i], color=PAL[i], label=p, capsize=1.5, lw=1)
         g = d[d.policy == p]
-        ax[1].scatter(g.groupby("ctx_len").realized_frac_fp16.mean(), g.groupby("ctx_len").ref_answer_nll_mean.mean(),
+        ax[1].scatter(g.groupby("Lb").realized_frac_fp16.mean(), g.groupby("Lb").ref_answer_nll_mean.mean(),
                       marker=MARK[i], color=PAL[i], s=14, label=p)
         if "pb" in d:
             order = [x for x in ("start", "early", "middle", "late", "end") if x in set(d.pb)] or sorted(d.pb.unique())
