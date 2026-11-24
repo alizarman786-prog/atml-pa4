@@ -184,7 +184,7 @@ def task2a(R, out):
                 ax[i].set_xlabel("sequence length"); ax[i].set_ylabel("median ms"); ax[i].legend(fontsize=7)
             savefig(fig, out, f"task2a_latency_{dt}")
     if (D / "tile_sweep.jsonl").exists():
-        emit(pd.DataFrame(jlines(D / "tile_sweep.jsonl")), out, "task2a_tile_sweep", "Task 2A — tile-size sweep")
+        emit(pd.json_normalize(jlines(D / "tile_sweep.jsonl")), out, "task2a_tile_sweep", "Task 2A — tile-size sweep")
 
 
 # ---------------- Task 2B ----------------
@@ -239,7 +239,8 @@ def task2c(R, out):
     t = pd.DataFrame(rows).sort_values(["ctx_len", "policy"])
     emit(t, out, "task2c_policies", "Task 2C — KV policies at the matched INT4 byte budget (bootstrap 95% CI)")
     if "position" in d:
-        d["pos_bin"] = pd.cut(d.position.astype(float), 5)
+        pos = pd.to_numeric(d.position, errors="coerce")
+        d["pos_bin"] = pd.cut(pos, 5) if pos.notna().all() else d.position.astype(str)   # labels like "start"/"middle"
         pb = d.groupby(["policy", "pos_bin"], observed=True).correct.mean().unstack()
         pb.columns = [str(c) for c in pb.columns]
         emit(pb.reset_index(), out, "task2c_by_position", "Task 2C — accuracy by evidence position")
