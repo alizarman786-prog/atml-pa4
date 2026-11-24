@@ -1,0 +1,444 @@
+\documentclass{article}
+\usepackage[main,final]{neurips_2026}   % copy neurips_2026.sty from your PA2/PA3 folder
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{amsfonts}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{nicefrac}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{titlesec}
+\usepackage{adjustbox}
+\titlespacing*{\section}{0pt}{8pt}{4pt}
+\titlespacing*{\subsection}{0pt}{6pt}{3pt}
+\titlespacing*{\subsubsection}{0pt}{5pt}{2pt}
+\titlespacing*{\paragraph}{0pt}{4pt}{2pt}
+\input{tables/notes.tex}   % generated numbers used inside captions
+\newcommand{\tab}[1]{\begin{adjustbox}{max width=\linewidth}\input{tables/#1.tex}\end{adjustbox}}
+% Placeholders: every \todo{...} marks text you still have to write. Remove the macro body (or redefine it as empty)
+% before submission; the hints inside each \todo point to the table/figure and numbers relevant to that passage.
+\newcommand{\todo}[1]{{\color{red}\textbf{[TODO:} #1\textbf{]}}}
+
+\title{\todo{title}}
+
+\author{%
+  Zarman Ali Awan \\
+  28100092 \\
+  \texttt{28100092@lums.edu.pk}
+}
+
+\begin{document}
+
+\maketitle
+\renewcommand{\arraystretch}{0.8}
+\setlength{\textfloatsep}{6pt plus 2pt minus 2pt}
+\setlength{\floatsep}{4pt plus 2pt minus 2pt}
+\setlength{\intextsep}{4pt plus 2pt minus 2pt}
+\setlength{\abovecaptionskip}{3pt}
+\setlength{\belowcaptionskip}{2pt}
+\setlength{\tabcolsep}{3.5pt}
+
+% =====================================================================================================
+\begin{abstract}
+\todo{Abstract: one or two sentences per task with the headline numbers. Task 1: best pruning and quantization result at
+matched sparsity/bytes (Table~\ref{tab:t1main}). Task 2: fidelity/latency of tiled vs.\ SDPA attention, which MQAR
+variants solve long-range recall, which KV policy wins at the INT4 budget. Task 3: whether distilled drafts improve
+alignment and measured speedup.} Code and results: \url{https://github.com/alizarman786-prog/atml-pa4}.
+\end{abstract}
+
+% =====================================================================================================
+\section{Introduction}
+\todo{Motivate the three tasks: compressing weights (pruning, quantization), the cost of attention and of the KV cache,
+and speculative decoding with distilled drafts. State what is measured in each task and that changes are reported in
+percentage points (pp) with uncertainty. Cite Wanda~\citep{sun2024wanda}, AWQ~\citep{lin2024awq}, OWL~\citep{yin2024owl},
+FlashAttention~\citep{dao2022flashattention}, MQAR/Zoology~\citep{arora2024zoology}, KIVI~\citep{liu2024kivi},
+StreamingLLM~\citep{xiao2024streamingllm}, speculative sampling~\citep{leviathan2023fast,chen2023accelerating},
+DistillSpec~\citep{zhou2024distillspec} and on-policy distillation~\citep{agarwal2024gkd} where relevant.}
+
+\section{Experimental Setup}
+\todo{Shared setup. Facts to state: Kaggle, 2$\times$ Tesla T4 (16\,GB), one experiment stream per GPU; PyTorch 2.11.0
+(CUDA 13.0), Transformers 4.57.1, PEFT 0.17.1; seed 6304 everywhere; models
+Qwen2.5-1.5B (rev.\ \texttt{8faed76}), Qwen2.5-1.5B-Instruct (\texttt{989aa79}) and Qwen2.5-0.5B-Instruct (\texttt{7ae5576})~\citep{qwen2024qwen25};
+data locked by the course data repository (C4~\citep{raffel2020c4}, WikiText-2~\citep{merity2017wikitext},
+HellaSwag~\citep{zellers2019hellaswag}, GSM8K~\citep{cobbe2021gsm8k}); all tables are generated from saved result files by
+\texttt{report/make\_report\_assets.py}.}
+
+% =====================================================================================================
+\section{Task 1: Pruning and Quantization of Qwen2.5-1.5B}
+\label{sec:task1}
+\subsection{Setup and Design Choices}
+\todo{Facts to state: eligible layers (all 7 linear projections of all 28 blocks); calibration 128$\times$512 C4 tokens,
+development set 32 C4 sequences (selection only), held-out WikiText-2 (\TOneWikiN{} scored tokens) and C4-validation
+(\TOneCFourN{}) perplexity with per-window cross-entropy, HellaSwag acc$_{norm}$ (2,000 examples; some conditions on the
+512-example diagnostic subset, marked $\dagger$); P1 magnitude and P2 Wanda (score $|W|\cdot\|X_j\|$, per-row) at
+$s\in\{0.25,0.5,0.75\}$ plus 2:4~\citep{mishra2021accelerating}; P3 block-wise allocation $s_\ell=S+\lambda(1-2\,r_\ell)$
+with min-max-normalized sensitivity $r_\ell$, clipped to [0.10, 0.85] and shifted to mean $S$, exact zero counts, measure
+and $\lambda$ selected on development NLL; Q1 RTN and Q2 AWQ-style (group 128, asymmetric, FP16 scale, $b$-bit zero point,
+$\alpha$ grid 0--1 step 0.1, scales folded into RMSNorm / v\_proj / up\_proj); Q3 exact multiple-choice knapsack over
+\TOneQThreeUnits{} (block, scaling-group) units under the uniform-Q2 packed-byte budget; storage counted as packed bytes.}
+
+\subsection{Results}
+\todo{One sentence pointing to Table~\ref{tab:t1main}, Fig.~\ref{fig:t1}, Table~\ref{tab:t1sel} and Fig.~\ref{fig:t1alloc}.}
+
+\begin{table}[!tb]
+\centering\footnotesize
+\caption{\todo{Caption: all Task 1 conditions; achieved sparsity or effective bits/weight; packed/sparse model size (GiB);
+WikiText-2 and C4 perplexity with change vs.\ FP16 and 95\% window-bootstrap CI; HellaSwag acc$_{norm}$ (\%,
+$\dagger$ = 512-example subset); development NLL.}}
+\label{tab:t1main}
+\tab{t1_main}
+\end{table}
+
+\begin{figure}[!tb]
+\centering
+\includegraphics[width=\linewidth]{figures/fig_task1.pdf}
+\caption{\todo{Caption: (a) WikiText-2 perplexity vs.\ target sparsity (log scale, dashed = FP16); (b) HellaSwag
+acc$_{norm}$ (hollow markers = 512-example subset, dotted = chance 25\%); (c) perplexity vs.\ packed size for Q1/Q2/Q3.}}
+\label{fig:t1}
+\end{figure}
+
+\begin{table}[!tb]
+\centering\footnotesize
+\caption{\todo{Caption: P3 and Q3 selection on the 32-sequence development set. All candidates, sensitivity measure,
+$\lambda$, resulting block-sparsity range (P3) or number of units at 2/3/4/8 bits (Q3), development NLL and change vs.\ the
+uniform rule at the same budget; \checkmark = selected.}}
+\label{tab:t1sel}
+\tab{t1_selection}
+\end{table}
+
+\begin{figure}[!tb]
+\centering
+\includegraphics[width=\linewidth]{figures/fig_task1_alloc.pdf}
+\caption{\todo{Caption: (a) selected P3 per-block sparsity for $S$=0.5 and 0.75 (dotted = uniform); (b,c) selected Q3 bit
+widths per block and scaling group at the 3- and 4-bit budgets.}}
+\label{fig:t1alloc}
+\end{figure}
+
+\subsection{Analysis}
+\paragraph{\todo{theme 1}.} \todo{RQ1: magnitude vs.\ activation vs.\ removal impact across sparsity and components.
+Evidence: kept-set overlap between magnitude and Wanda per projection and depth, activation-norm outliers
+(Table~\ref{tab:t1scores}, Fig.~\ref{fig:t1scores}); P1 vs.\ P2 at each sparsity in Table~\ref{tab:t1main} (with CIs).}
+
+\paragraph{\todo{theme 2}.} \todo{RQ2: which blocks/groups are sensitive and how the allocation rule turns measurements
+into resources. Evidence: Table~\ref{tab:t1sel}, Fig.~\ref{fig:t1alloc}; which measure won, where sparsity/bits went.}
+
+\paragraph{\todo{theme 3}.} \todo{RQ3: uniform vs.\ layer-dependent at matched sparsity/bytes; perplexity vs.\ HellaSwag
+agreement or disagreement (P3 vs.\ P2, Q3 vs.\ Q2 rows of Table~\ref{tab:t1main}; development vs.\ held-out).}
+
+\paragraph{\todo{theme 4}.} \todo{RQ4: theoretical vs.\ practical savings. Evidence: compression time, calibration error,
+prefill/decode latency (Table~\ref{tab:t1cost}); sparse16 storage vs.\ dense; no sparse/low-bit kernels used, so latency
+stays at FP16 levels; packed bytes vs.\ allocated memory.}
+
+% =====================================================================================================
+\section{Task 2: Efficient Attention and Context Memory}
+\label{sec:task2}
+\subsection{Setup and Design Choices}
+\todo{Facts to state. Part A: dense, online-softmax tiled (128$\times$128) and PyTorch SDPA attention, \TTwoAShape,
+FP16/FP32, correctness vs.\ FP32 reference, median of repeated CUDA-synchronized timings, peak memory above inputs.
+Part B: 2-layer MQAR models (dense / window-64 / dilated / linear ELU+1 / hybrid 2 linear + 2 local-16 heads), trained
+per configuration over \TTwoBSeeds{} seeds, test splits near/far/mixed for $K\in\{4,8,16\}$. Part C: Qwen2.5-1.5B-Instruct
+retrieval prompts (\TTwoCN{} prompts), policies full / sink+recent / query-aware eviction / token-wise INT4 /
+KIVI-layout INT4~\citep{liu2024kivi} / INT2--FP16 hybrid at the matched INT4 byte budget; absolute RoPE positions kept
+after eviction; real bit packing.}
+
+\subsection{Results}
+\todo{One sentence pointing to Tables~\ref{tab:t2abench}, \ref{tab:t2b}, \ref{tab:t2c} and Figs.~\ref{fig:t2a}--\ref{fig:t2c}.}
+
+\begin{table}[!tb]
+\centering\footnotesize
+\caption{\todo{Caption: Part A, FP16 median latency (ms) and peak memory above inputs (MiB) for forward and
+forward+backward at three sequence lengths; OOM = out of memory.}}
+\label{tab:t2abench}
+\tab{t2a_bench}
+\end{table}
+
+\begin{figure}[!tb]
+\centering
+\includegraphics[width=\linewidth]{figures/fig_task2a.pdf}
+\caption{\todo{Caption: Part A latency (a: forward, b: forward+backward) and (c) peak memory vs.\ sequence length, FP16.}}
+\label{fig:t2a}
+\end{figure}
+
+\begin{table}[!tb]
+\centering\footnotesize
+\caption{\todo{Caption: Part B, MQAR test accuracy (\%, mean $\pm$ s.d.\ over seeds) per trained configuration on six
+test splits; chance $1/K$.}}
+\label{tab:t2b}
+\tab{t2b_mqar}
+\end{table}
+
+\begin{figure}[!tb]
+\centering
+\includegraphics[width=\linewidth]{figures/fig_task2b.pdf}
+\caption{\todo{Caption: Part B (a) K16\_mixed accuracy by key--query distance; (b) development accuracy during training;
+(c) single-layer forward time vs.\ $T$ (dotted = chance).}}
+\label{fig:t2b}
+\end{figure}
+
+\begin{table}[!tb]
+\centering\footnotesize
+\caption{\todo{Caption: Part C, retrieval accuracy with 95\% prompt-bootstrap CI, stored KV bytes relative to FP16, share
+of prompts within budget, evidence retained, first-token KL and answer NLL vs.\ the full cache, selection+compression
+time and peak memory, per context length.}}
+\label{tab:t2c}
+\tab{t2c_policies}
+\end{table}
+
+\begin{figure}[!tb]
+\centering
+\includegraphics[width=\linewidth]{figures/fig_task2c.pdf}
+\caption{\todo{Caption: Part C (a) accuracy vs.\ context length (95\% CI); (b) answer NLL vs.\ stored bytes; (c) accuracy
+by evidence position.}}
+\label{fig:t2c}
+\end{figure}
+
+\subsection{Analysis}
+\paragraph{\todo{theme 1}.} \todo{RQ1: fidelity, backward cost and memory of dense vs.\ tiled vs.\ SDPA
+(Table~\ref{tab:t2afid}, Table~\ref{tab:t2abench}, Fig.~\ref{fig:t2a}); the tiled kernel is a Python-level reference, not
+a fused FlashAttention kernel.}
+
+\paragraph{\todo{theme 2}.} \todo{RQ2: receptive field, dilation, content selection and linear state vs.\ recall by
+distance and $K$ (Table~\ref{tab:t2b}, Fig.~\ref{fig:t2b}, theory in Table~\ref{tab:t2btheory}, dense-model mask controls
+in Table~\ref{tab:t2bctl}); the hybrid intervention and its prediction; failures to learn.}
+
+\paragraph{\todo{theme 3}.} \todo{RQ3: eviction vs.\ full-context quantization vs.\ hybrid at the INT4 budget; token- vs.\
+channel-wise key grouping; what answer NLL, KL and evidence retention add beyond exact match (Table~\ref{tab:t2c},
+Fig.~\ref{fig:t2c}, Table~\ref{tab:t2cpos}).}
+
+\paragraph{\todo{theme 4}.} \todo{RQ4: prefill, importance scoring, packing/unpacking and decode overhead vs.\ nominal
+compression (Table~\ref{tab:t2cpack}, compression time column of Table~\ref{tab:t2c}, sweep in Table~\ref{tab:t2bsweep}).}
+
+% =====================================================================================================
+\section{Task 3: Policy Distillation and Speculative Decoding}
+\label{sec:task3}
+\subsection{Setup and Design Choices}
+\todo{Facts to state: target Qwen2.5-1.5B-Instruct, draft Qwen2.5-0.5B-Instruct; exact speculative sampling with shared
+accept/residual/bonus rule and KV-cache rollback, checked by unit tests (\TThreeUnitTests{} passed) and a $\chi^2$ test on a
+toy Markov model with a wrong-residual negative control (Table~\ref{tab:t3toy}); LoRA~\citep{hu2022lora} $r$=8, $\alpha$=16
+on q/k/v/o (\TThreeTrainable{} trainable parameters), forward-KL distillation on teacher-generated (off-policy) or
+student-generated (on-policy) prefixes, two seeds each, exact 256-token updates, quota 30k math + 10k short-form scored
+tokens; alignment on \TThreeAlignPrefixes{} prefixes per draft from seven prefix banks; speculative benchmark on
+\TThreeSpecPrompts{} prompts $\times$ \TThreeSpecReps{} repetitions, $\gamma\in\{2,4\}$, counterbalanced order, paired by
+seed.}
+
+\subsection{Results}
+\todo{One sentence pointing to Tables~\ref{tab:t3cost}, \ref{tab:t3align}, \ref{tab:t3spec}, \ref{tab:t3acc} and
+Fig.~\ref{fig:t3}.}
+
+\begin{table}[!tb]
+\centering\footnotesize
+\caption{\todo{Caption: distillation runs, realized optimizer updates, skipped updates, scored tokens, training
+sequences, cost breakdown (minutes) and peak memory.}}
+\label{tab:t3cost}
+\tab{t3_cost}
+\end{table}
+
+\begin{table}[!tb]
+\centering\footnotesize
+\caption{\todo{Caption: expected one-token acceptance $1-$TV between target and each draft, averaged over prefixes from
+each bank (target, original draft, exact speculative output, each student's own rollouts). FKL in
+Table~\ref{tab:t3fkl}, CIs in Table~\ref{tab:t3alignfull}.}}
+\label{tab:t3align}
+\tab{t3_align_accept}
+\end{table}
+
+\begin{table}[!tb]
+\centering\footnotesize
+\caption{\todo{Caption: speculative decoding per draft and $\gamma$: acceptance rate, accepted tokens and emitted tokens per
+round, tokens per round predicted from $1-$TV on target prefixes, tokens per target call, throughput, and geometric-mean
+speedup over plain target sampling with 95\% bootstrap CI.}}
+\label{tab:t3spec}
+\tab{t3_spec}
+\end{table}
+
+\begin{figure}[!tb]
+\centering
+\includegraphics[width=\linewidth]{figures/fig_task3.pdf}
+\caption{\todo{Caption: (a) forward KL per token during distillation (rolling mean); (b) predicted vs.\ measured tokens per
+round (dotted = identity); (c) measured speedup vs.\ $\gamma$ (95\% CI, dotted = no speedup).}}
+\label{fig:t3}
+\end{figure}
+
+\begin{table}[!tb]
+\centering\footnotesize
+\caption{\todo{Caption: standalone answer accuracy (\%, 95\% CI) and truncation rate of the target and each draft on
+math and short-form prompts.}}
+\label{tab:t3acc}
+\tab{t3_accuracy}
+\end{table}
+
+\subsection{Analysis}
+\paragraph{\todo{theme 1}.} \todo{RQ1: effect of the prefix distribution (off- vs.\ on-policy) on agreement on target,
+student and own prefixes (Table~\ref{tab:t3align}); exactness of speculative sampling (Table~\ref{tab:t3toy}, spec bank).}
+
+\paragraph{\todo{theme 2}.} \todo{RQ2: domain, length and position effects; transfer from the training distribution
+(Table~\ref{tab:t3aligndom}, Table~\ref{tab:t3specdom}).}
+
+\paragraph{\todo{theme 3}.} \todo{RQ3: how well $1-$TV predicts acceptance and target work as $\gamma$ changes
+(Fig.~\ref{fig:t3}b, Table~\ref{tab:t3spec}); gap between analytical and measured speedup via per-forward costs
+(Table~\ref{tab:t3decode}) and per-round overhead.}
+
+\paragraph{\todo{theme 4}.} \todo{RQ4: when draft cost, verification, adapter execution (Table~\ref{tab:t3merge}) or EOS
+termination (fixed-64 diagnostic, Table~\ref{tab:t3fixed}) dominate; including distillation cost (Table~\ref{tab:t3cost}).}
+
+% =====================================================================================================
+\section{Conclusion}
+\label{sec:conclusion}
+\todo{Short conclusion.}
+
+\paragraph{Limitations and deviations.} \todo{Facts to state: single seed for Tasks 1 and 2C (MQAR uses \TTwoBSeeds{}
+seeds); some HellaSwag numbers on the 512-example subset; the course prefix-bank script raised an error with the pinned
+Transformers 4.57.1 (\texttt{generate} rejects \texttt{generator=}) and was run unchanged through a wrapper that seeds the
+RNG from the same per-prompt seed; the first Task~3 alignment run exhausted host RAM and was recomputed in a separate run
+from the saved checkpoints; dense FP16/FP32 forward+backward at the longest length ran out of memory (Table~\ref{tab:t2abench});
+the tiled kernel is a reference implementation without fusion; latencies on T4 without sparse or low-bit kernels.}
+
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+% =====================================================================================================
+\clearpage
+\appendix
+\setlength{\floatsep}{14pt plus 2pt minus 2pt}\setlength{\intextsep}{14pt plus 2pt minus 2pt}
+\section{Additional results}
+
+\begin{table}[!htb]
+\centering\footnotesize
+\caption{\todo{Caption: Task 1 compression cost and latency (median ms; prefill of 512/2048 tokens, 64 decode steps after
+a 512-token prefix), storage format and mean relative calibration output error.}}
+\label{tab:t1cost}
+\tab{t1_cost}
+\end{table}
+
+\begin{table}[!htb]
+\centering\footnotesize
+\caption{\todo{Caption: Task 1 per-projection score statistics over the 28 blocks: kept-set overlap between magnitude and
+Wanda pruning at 50\%/75\%, max/median input-feature norm, share of Wanda scores above 5$\times$ the mean.}}
+\label{tab:t1scores}
+\tab{t1_scores}
+\end{table}
+
+\begin{figure}[!htb]
+\centering
+\includegraphics[width=\linewidth]{figures/fig_task1_scores.pdf}
+\caption{\todo{Caption: Task 1 (a) magnitude/Wanda kept-set overlap at 50\% per block and projection; (b) activation-norm
+outlier ratio per block.}}
+\label{fig:t1scores}
+\end{figure}
+
+\begin{table}[!htb]
+\centering\footnotesize
+\caption{\todo{Caption: Task 2A numerical fidelity vs.\ the FP32 reference (maximum over sequence lengths): relative
+Frobenius error of output and gradients, output max-abs error, all outputs finite.}}
+\label{tab:t2afid}
+\tab{t2a_fidelity}
+\end{table}
+
+\begin{table}[!htb]
+\centering\footnotesize
+\caption{\todo{Caption: Task 2A tile-size sweep of the tiled kernel.}}
+\label{tab:t2atiles}
+\tab{t2a_tiles}
+\end{table}
+
+\begin{table}[!htb]
+\centering\footnotesize
+\caption{\todo{Caption: Task 2B theoretical attended pairs, reachable distance after two layers and decode-time state.}}
+\label{tab:t2btheory}
+\tab{t2b_theory}
+\end{table}
+
+\begin{table}[!htb]
+\centering\footnotesize
+\caption{\todo{Caption: Task 2B dense models evaluated with a test-time window-64 mask or top-64 key selection.}}
+\label{tab:t2bctl}
+\tab{t2b_controls}
+\end{table}
+
+\begin{table}[!htb]
+\centering\footnotesize
+\caption{\todo{Caption: Task 2B single-layer forward time (ms) / extra peak memory (MiB) vs.\ $T$, batch 8.}}
+\label{tab:t2bsweep}
+\tab{t2b_sweep}
+\end{table}
+
+\begin{table}[!htb]
+\centering\footnotesize
+\caption{\todo{Caption: Task 2C accuracy (\%) by evidence position.}}
+\label{tab:t2cpos}
+\tab{t2c_position}
+\end{table}
+
+\begin{table}[!htb]
+\centering\footnotesize
+\caption{\todo{Caption: Task 2C packed INT4 cache: FP16 vs.\ serialized packed vs.\ formula bytes, pack/unpack time, decode
+step time and peak allocated memory; the packed path dequantizes to FP16 before SDPA.}}
+\label{tab:t2cpack}
+\tab{t2c_packing}
+\end{table}
+
+\begin{table}[!htb]
+\centering\footnotesize
+\caption{\todo{Caption: Task 3 toy exactness test ($\chi^2$ against the exact target sequence distribution) for the correct
+sampler and the wrong-residual negative control.}}
+\label{tab:t3toy}
+\tab{t3_toy}
+\end{table}
+
+\begin{table}[!htb]
+\centering\footnotesize
+\caption{\todo{Caption: Task 3 forward KL(target $\|$ draft) per bank.}}
+\label{tab:t3fkl}
+\tab{t3_align_fkl}
+\end{table}
+
+\begin{table}[!htb]
+\centering\footnotesize
+\caption{\todo{Caption: Task 3 all alignment metrics with 95\% prefix-bootstrap CIs.}}
+\label{tab:t3alignfull}
+\tab{t3_align_full}
+\end{table}
+
+\begin{table}[!htb]
+\centering\footnotesize
+\caption{\todo{Caption: Task 3 $1-$TV by prompt domain.}}
+\label{tab:t3aligndom}
+\tab{t3_align_domain}
+\end{table}
+
+\begin{table}[!htb]
+\centering\footnotesize
+\caption{\todo{Caption: Task 3 speculative decoding by domain at $\gamma$=\TThreeSpecGammaMax.}}
+\label{tab:t3specdom}
+\tab{t3_spec_domain}
+\end{table}
+
+\begin{table}[!htb]
+\centering\footnotesize
+\caption{\todo{Caption: Task 3 fixed 64-token (EOS ignored) timing diagnostic.}}
+\label{tab:t3fixed}
+\tab{t3_fixed64}
+\end{table}
+
+\begin{table}[!htb]
+\centering\footnotesize
+\caption{\todo{Caption: Task 3 per-forward decode cost (median ms) of target and drafts.}}
+\label{tab:t3decode}
+\tab{t3_decode}
+\end{table}
+
+\begin{table}[!htb]
+\centering\footnotesize
+\caption{\todo{Caption: Task 3 merged vs.\ unmerged LoRA adapter generation time.}}
+\label{tab:t3merge}
+\tab{t3_merge}
+\end{table}
+
+\todo{Describe how qualitative examples (if any) were selected.}
+
+\end{document}
