@@ -46,6 +46,8 @@ On Kaggle, open `notebooks/PA4_kaggle.ipynb` with GPU T4 x2 and Internet on, set
 Teacher and original-draft prefix banks are built with `python -m pa4.prefix_banks`, which runs the course script `setup_data.py --prefix-banks` unchanged; the shim only adapts its `generate(generator=...)` call to the pinned transformers 4.57.1 by seeding the RNG from the same per-prompt seed.
 To turn saved results into tables and figures, unpack the result archives into one folder and run
 `python -m pa4.report --results results --out report_assets` (needs pandas and matplotlib; `tabulate` is optional).
+The report skeleton (`report/main.tex`, `report/references.bib`) is filled by `python report/make_report_assets.py --results results --out report_tex`, which writes the LaTeX tables, caption macros and PDF figures (Phase `R` runs it on Kaggle and saves `report_tex.zip`).
+
 Every stage writes machine-readable JSON/JSONL/NPZ files under `$PA4_OUT` and skips work that is already saved.
 Setting `PA4_QUICK=1` runs a reduced smoke test.
 

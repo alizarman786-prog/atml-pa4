@@ -159,6 +159,11 @@ code('''if PHASE == "R":
 code('''# Package results for download (Output tab) — small JSON/JSONL/NPZ files only
 src = "smoke" if PHASE == "smoke" else "results"
 subprocess.run(f"cd /kaggle/working/code && python -m pa4.report --results /kaggle/working/{src} --out /kaggle/working/report_{PHASE}", shell=True)
+if PHASE == "R":   # LaTeX tables, caption macros and PDF figures for the report, zipped for download
+    import shutil
+    subprocess.run("cd /kaggle/working/code && python report/make_report_assets.py --results /kaggle/working/results "
+                   "--out /kaggle/working/report_tex && cat /kaggle/working/report_tex/tables/*.tex", shell=True)
+    shutil.make_archive("/kaggle/working/report_tex", "zip", "/kaggle/working", "report_tex")
 subprocess.run(f"cd /kaggle/working && tar czf results_{PHASE}.tgz {src} logs report_{PHASE} && ls -la /kaggle/working", shell=True)
 ''')
 
