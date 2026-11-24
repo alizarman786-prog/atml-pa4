@@ -16,11 +16,12 @@ Set `PHASE` in the next cell, then **Run All** (interactive) or **Save Version �
 | `smoke` | quick end-to-end tests of every script (tiny budgets) → `/kaggle/working/smoke` | ~40 min (already passed) |
 | `A` | full Task 1 on GPU0 ‖ full Task 2 (A, B, C) on GPU1 → `/kaggle/working/results` | ~3–3.5 h |
 | `B` | full Task 3 (prefix banks, 4 distillation runs, all evaluations) on both GPUs | ~3–4 h |
+| `R` | report only: attach the Phase A output (as a dataset) and the Phase C output, then build tables and figures | ~5 min |
 | `C` | re-run only the Task 3 alignment stage on top of a finished Phase B (attach the Phase B notebook output as Input first) | ~40–50 min |
 
 Logs stream to `/kaggle/working/logs/*.log`; every stage resumes from saved results if restarted.""")
 
-code('PHASE = "A"   # "smoke" | "A" | "B" | "C"\n')
+code('PHASE = "A"   # "smoke" | "A" | "B" | "C" | "R"\n')
 
 code("""%%bash
 set -e
@@ -34,7 +35,7 @@ cat data/local_source_revisions.json
 rm -rf /kaggle/working/code && git clone -q https://github.com/alizarman786-prog/atml-pa4.git /kaggle/working/code
 echo "code commit: $(git -C /kaggle/working/code log -1 --format=%H)"
 mkdir -p /kaggle/working/logs
-nvidia-smi --query-gpu=index,name,memory.total --format=csv
+nvidia-smi --query-gpu=index,name,memory.total --format=csv || echo "no GPU (CPU session)"
 python -c "import torch,transformers,peft;print(torch.__version__,transformers.__version__,peft.__version__)"
 """)
 
@@ -136,6 +137,23 @@ code('''if PHASE == "C":
     procs = {"t3_align": stream("t3_align", 0, ["python -m pa4.prefix_banks",
                                                 "python -m pa4.t3_eval --stage align"])}
     wait_all(procs, every=120); show_failures()
+''')
+
+code('''if PHASE == "R":
+    # Report only: gather Task 1-2 results (Phase A dataset) and Task 3 results (Phase C output) into one folder.
+    import glob, shutil, tarfile
+    dst = pathlib.Path("/kaggle/working/results"); dst.mkdir(exist_ok=True); pathlib.Path("/kaggle/working/logs").mkdir(exist_ok=True)
+    for task in ("task1", "task2", "task3"):
+        hits = sorted(glob.glob(f"/kaggle/input/**/results/{task}", recursive=True))
+        if hits:
+            best = max(hits, key=lambda h: sum(1 for _ in pathlib.Path(h).rglob("*")))
+            shutil.copytree(best, dst / task, dirs_exist_ok=True); print(task, "<-", best); continue
+        for tgz in glob.glob("/kaggle/input/**/results_*.tgz", recursive=True):
+            with tarfile.open(tgz) as tf:
+                mem = [m for m in tf.getmembers() if m.name.startswith(f"results/{task}")]
+                if mem: tf.extractall("/kaggle/working", members=mem); print(task, "<-", tgz); break
+        else: print("!!! no results for", task)
+    print(sorted(str(p.relative_to(dst)) for p in dst.glob("*/*"))[:60])
 ''')
 
 code('''# Package results for download (Output tab) — small JSON/JSONL/NPZ files only
