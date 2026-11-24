@@ -230,6 +230,8 @@ def task2c(R, out):
     if not f.exists(): raise FileNotFoundError(f)
     d = pd.DataFrame(jlines(f))
     rows = []
+    if "target_tokens" in d and d.target_tokens.notna().all():
+        d["ctx_len"] = d.target_tokens          # nominal bucket; actual token counts vary per prompt
     for (pol, L), g in d.groupby(["policy", "ctx_len"]):
         m, lo, hi = boot_mean_ci(g.correct.astype(float))
         rows.append(dict(policy=pol, ctx_len=L, n=len(g), accuracy=m, acc_ci95=f"[{lo:.3f}, {hi:.3f}]",
