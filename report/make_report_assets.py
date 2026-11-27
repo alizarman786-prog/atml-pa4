@@ -158,6 +158,44 @@ def hs(r):
     return h, h.get("n", 512)
 
 
+def tex_text(s, n):
+    """Plain-ASCII, LaTeX-escaped snippet of model or dataset text (for qualitative tables)."""
+    s = " ".join(str(s).split()).encode("ascii", "replace").decode()
+    s = s[:n] + ("..." if len(s) > n else "")
+    s = s.replace("\\", "\x00")
+    for a, b in (("{", r"\{"), ("}", r"\}"), ("$", r"\$"), ("&", r"\&"), ("#", r"\#"), ("_", r"\_"), ("%", r"\%"),
+                 ("^", r"\^{}"), ("~", r"\~{}"), ("<", r"\textless{}"), (">", r"\textgreater{}"), ("|", r"\textbar{}")):
+        s = s.replace(a, b)
+    return s.replace("\x00", r"\textbackslash{}")
+
+
+def _hs_pre(text):
+    import re
+    text = text.strip().replace(" [title]", ". ")
+    text = re.sub("\\[.*?\\]", "", text)
+    return text.replace("  ", " ")
+
+
+def hs_rows():
+    """Locked HellaSwag rows keyed by 'order' (needed for gold labels and ending lengths)."""
+    import os
+    roots = [os.environ.get("PA4_DATA", ""), "/kaggle/working/atml-pa4-datasets", "/kaggle/working"]
+    for r in [r for r in roots if r]:
+        hits = glob.glob(str(Path(r) / "**" / "hellaswag_val_locked.jsonl.gz"), recursive=True)
+        if hits: return {x["order"]: x for x in jlines(hits[0])}
+    return None
+
+
+def hs_correct(arr, orders, hsd):
+    """acc_norm correctness per example (lm-eval-harness convention: log-lik / character length)."""
+    idx = {o: i for i, o in enumerate(arr["hs_order"].tolist())}
+    ll = arr["hs_ll"][[idx[o] for o in orders]]
+    clen = np.array([[len(_hs_pre(e)) for e in hsd[o]["example"]["endings"]] for o in orders], float)
+    gold = np.array([int(hsd[o]["example"]["label"]) for o in orders])
+    pred = (ll / clen).argmax(1)
+    return pred == gold, pred, gold
+
+
 @section
 def task1_tables(R, out):
     rows = t1_conditions(R)
@@ -261,6 +299,66 @@ def task1_scores(R, out):
     ax[1].set_xlabel("block"); ax[1].set_ylabel(r"max / median input-feature norm"); ax[1].set_yscale("log")
     panel(ax[0], "a", "pruned-set overlap"); panel(ax[1], "b", "activation outliers"); ax[1].legend(ncol=2, loc="upper left")
     savefig(fig, out, "fig_task1_scores")
+
+
+T1_PAIRS = [("P2_s0.50", "P3_s0.50"), ("P2_s0.75", "P3_s0.75"), ("Q2_b3", "Q3_b3"), ("Q2_b4", "Q3_b4")]
+
+
+@section
+def task1_paired(R, out):
+    """Paired 95% bootstrap CIs for P3-P2 and Q3-Q2 (whole windows for PPL, examples for HellaSwag)."""
+    hsd, rows, conds = hs_rows(), [], t1_conditions(R)
+    for a_, b_ in T1_PAIRS:
+        A, B = t1_arrays(R, a_), t1_arrays(R, b_)
+        if A is None or B is None: continue
+        cells = [f"{esc(t1_label(b_))} $-$ {esc(t1_label(a_))}"]
+        for key in ("wikitext2", "c4val"):
+            d, lo, hi = boot_ppl_diff(dict(nll=A[f"{key}_nll"], cnt=A[f"{key}_cnt"]), dict(nll=B[f"{key}_nll"], cnt=B[f"{key}_cnt"]))
+            cells.append(f"{num(d, 2)} {ci(lo, hi, 2)}")
+        if hsd is not None and "hs_ll" in A and "hs_ll" in B:
+            ob = set(B["hs_order"].tolist()); common = [o for o in A["hs_order"].tolist() if o in ob]
+            ca, _, _ = hs_correct(A, common, hsd); cb, _, _ = hs_correct(B, common, hsd)
+            for n_, c_ in ((a_, ca), (b_, cb)):
+                h, nn = hs(conds.get(n_, {}))
+                print(f"  check {n_}: recomputed acc_norm on {len(common)} = {c_.mean():.4f}; stored ({nn}) = {h.get('acc_norm')}")
+            m, lo, hi = boot_mean(cb.astype(float) - ca.astype(float))
+            cells += [f"{100 * m:+.1f} [{100 * lo:+.1f}, {100 * hi:+.1f}]", f"{len(common):,}"]
+        else:
+            cells += ["--", "--"]
+        rows.append(cells)
+    tabular(rows, ["Comparison", r"$\Delta$Wiki PPL [95\% CI]", r"$\Delta$C4 PPL [95\% CI]", r"$\Delta$HS acc$_n$ (pp) [95\% CI]",
+                   "HS $n$"], "lrrrr", out, "t1_paired")
+
+
+T1_QUAL = ["fp16", "P2_s0.50", "P3_s0.50", "Q2_b3", "Q3_b3"]
+
+
+@section
+def task1_qual(R, out):
+    """Fixed selection: the first two examples in locked order, then the first two (in order) where FP16 is correct and
+    P3 s=.50 or Q3 3-bit picks a different ending than FP16."""
+    hsd = hs_rows()
+    if hsd is None: raise FileNotFoundError("hellaswag_val_locked.jsonl.gz")
+    arrs = {n: t1_arrays(R, n) for n in T1_QUAL}
+    if any(a is None or "hs_ll" not in a for a in arrs.values()): raise FileNotFoundError("task1 arrays")
+    orders = sorted(set.intersection(*[set(a["hs_order"].tolist()) for a in arrs.values()]))
+    P = {n: hs_correct(a, orders, hsd) for n, a in arrs.items()}
+    gold = P["fp16"][2]
+    pick = orders[:2]
+    for i, o in enumerate(orders):
+        if len(pick) >= 4: break
+        if o in pick: continue
+        if P["fp16"][0][i] and (P["P3_s0.50"][1][i] != P["fp16"][1][i] or P["Q3_b3"][1][i] != P["fp16"][1][i]): pick.append(o)
+    rows = []
+    for o in pick:
+        i = orders.index(o); ex = hsd[o]["example"]
+        cells = [str(o), tex_text(_hs_pre(ex["activity_label"] + ": " + ex["ctx_a"] + " " + ex["ctx_b"]), 48),
+                 tex_text(_hs_pre(ex["endings"][gold[i]]), 30) + f" ({gold[i]})"]
+        for n in T1_QUAL:
+            cells.append(f"{P[n][1][i]}" + (r" \checkmark" if P[n][0][i] else r" $\times$"))
+        rows.append(cells)
+    tabular(rows, ["Order", "Context (truncated)", "Gold ending (index)"] + [esc(t1_label(n)) for n in T1_QUAL], "rll" + "c" * len(T1_QUAL),
+            out, "t1_qual")
 
 
 @section
@@ -550,6 +648,32 @@ def task2c(R, out):
                        "Step packed ms", "Peak FP16 GiB", "Peak packed GiB"], "rrlrrrrrrrrr", out, "t2c_packing")
 
 
+@section
+def task2c_qual(R, out):
+    """Fixed selection: at the longest context, the first prompt id (sorted) for each evidence position."""
+    d = pd.DataFrame(jlines(R / "task2" / "C" / "c5_per_prompt.jsonl"))
+    if "output" not in d: raise KeyError("output")
+    d["Lb"] = d.target_tokens if "target_tokens" in d and d.target_tokens.notna().all() else d.ctx_len
+    L = d.Lb.max(); dl_ = d[d.Lb == L]
+    order = [x for x in ("start", "early", "middle", "late", "end") if x in set(dl_.position.astype(str))] or sorted(dl_.position.astype(str).unique())
+    pols = [p for p in POL if p in set(d.policy)]
+    rows, texts = [], []
+    for pos in order:
+        ids = sorted(dl_[dl_.position.astype(str) == pos].id.unique())
+        if not ids: continue
+        pid = ids[0]; g = dl_[dl_.id == pid].set_index("policy")
+        code = g.code.iloc[0]
+        cells = [tex_text(pid, 18), esc(pos), tex_text(code, 10)]
+        for p in pols:
+            if p not in g.index: cells.append("--"); continue
+            r = g.loc[p]; cells.append(tex_text(r.pred if r.pred is not None else "none", 10) + (r" \checkmark" if r.correct else r" $\times$"))
+        rows.append(cells)
+        if pos == order[0]:
+            texts = [[esc(p), tex_text(g.loc[p].output, 70)] for p in pols if p in g.index]
+    tabular(rows, ["Prompt", "Evidence", "Gold"] + [esc(p) for p in pols], "lll" + "l" * len(pols), out, "t2c_qual")
+    if texts: tabular(texts, ["Policy", f"Greedy output, prompt {tex_text(rows[0][0], 18)} (first 70 characters)"], "ll", out, "t2c_qual_text")
+
+
 # ---------------------------------------------------------------- Task 3
 DRAFT_LABEL = {"original": "original", "off_6304": "off-policy s1", "off_6305": "off-policy s2",
                "on_6304": "on-policy s1", "on_6305": "on-policy s2", "target": "target (1.5B)"}
@@ -735,6 +859,28 @@ def task3_misc(R, out):
         tabular(rows, ["Adapter path", "Runs", "Wall (s)", "Tokens", "tok/s"], "lrrrr", out, "t3_merge")
 
 
+T3_QUAL = ["target", "original", "off_6304", "on_6304"]
+
+
+@section
+def task3_qual(R, out):
+    """Fixed selection: the first two math prompts and the first short-form prompt (sorted ids), first repetition."""
+    acc = sorted(glob.glob(str(R / "task3" / "eval" / "standalone_accuracy_*.jsonl")))
+    s = pd.concat([pd.DataFrame(jlines(f)) for f in acc], ignore_index=True).drop_duplicates(["model", "rep", "prompt_id"])
+    s = s[s.rep == s.rep.min()]
+    ids = [(p, True) for p in sorted(s[s.domain == "math"].prompt_id.unique())[:2]] + \
+          [(p, False) for p in sorted(s[s.domain != "math"].prompt_id.unique())[:1]]
+    rows = []
+    for pid, is_math in ids:
+        for m in [m for m in T3_QUAL if m in set(s.model)]:
+            g = s[(s.prompt_id == pid) & (s.model == m) & ((s.domain == "math") == is_math)]
+            if g.empty: continue
+            r = g.iloc[0]
+            rows.append([tex_text(pid, 14), esc(dl(m)), int(r.n_tokens), "yes" if r.truncated else "no",
+                         r"\checkmark" if r.correct else r"$\times$", tex_text(r.text, 75)])
+    tabular(rows, ["Prompt", "Model", "Tokens", "Trunc.", "Correct", "Sampled response (first 75 characters)"], "llrccl", out, "t3_qual")
+
+
 # ---------------------------------------------------------------- main
 def main():
     ap = argparse.ArgumentParser()
@@ -742,8 +888,8 @@ def main():
     a = ap.parse_args()
     R, out = Path(a.results), Path(a.out)
     (out / "tables").mkdir(parents=True, exist_ok=True); (out / "figures").mkdir(parents=True, exist_ok=True)
-    for fn in (task1_tables, task1_selection, task1_scores, task1_figure, task1_alloc_figure, task2a, task2b, task2c,
-               task3_train, task3_align, task3_spec, task3_misc):
+    for fn in (task1_tables, task1_paired, task1_qual, task1_selection, task1_scores, task1_figure, task1_alloc_figure, task2a, task2b,
+               task2c, task2c_qual, task3_train, task3_align, task3_spec, task3_misc, task3_qual):
         fn(R, out)
     lines = ["% generated by report/make_report_assets.py -- numbers used inside captions"]
     for k in ("TOneWikiN", "TOneCFourN", "TOneQThreeUnits", "TTwoAShape", "TTwoBSeeds", "TTwoCN", "TThreeUnitTests", "TThreeTrainable",
